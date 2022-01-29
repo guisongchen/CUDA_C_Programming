@@ -1,14 +1,17 @@
 #include <stdio.h>
 
 __global__ void helloFromGPU(void) {
-    printf("Hello from GPU\n");
+    if (threadIdx.x == 5) {
+        printf("Hello from GPU thread %d\n", threadIdx.x);
+    }
 }
 
 int main(void) {
     printf("Hello from CPU\n");
 
-    helloFromGPU<<<5, 10>>>();
-    cudaDeviceReset();
+    helloFromGPU<<<1, 10>>>();
+    // cudaDeviceReset();
+    cudaDeviceSynchronize();
 
     return 0;
 }
