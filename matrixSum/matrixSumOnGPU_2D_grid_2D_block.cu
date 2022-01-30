@@ -33,7 +33,7 @@ int main(int argc, char **argv) {
     int nx = 1 << 14;
     int ny = 1 << 14;
     int nxy = nx*ny;
-    size_t nBytes = nxy * sizeof(float);
+    size_t nBytes = nxy * sizeof(float);  // 1GB
     printf("vector size: nx=%d ny=%d\n", nx, ny);
 
     float *h_a, *h_b, *hRet, *dRet;
