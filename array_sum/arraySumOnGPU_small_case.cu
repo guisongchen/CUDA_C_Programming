@@ -1,16 +1,34 @@
 #include <cuda_runtime.h>
 #include <stdio.h>
+#include <sys/time.h>
+
+#define CHECK(call) \
+{   \
+    const cudaError_t error = call; \
+    if (error != cudaSuccess)    \
+    {   \
+    printf("Error: %s:%d, ", __FILE__, __LINE__);    \
+    printf("code:%d, reason:%s\n", error, cudaGetErrorString(error));    \
+    }   \
+}   \
 
 void initData(float *dataPtr, int size);
 void sumArrayOnHost(float *pa, float *pb, float *pc, const int size);
 void checkResult(float *hRet, float *dRet, const int size);
-__global__ void sumArrayOnGPU(float *pa, float *pb, float *pc);
+double cpuSecond();
+__global__ void sumArrayOnGPU(float *pa, float *pb, float *pc, const int size);
 
 int main(int argc, char **argv) {
-    int dev = 0;
-    cudaSetDevice(dev);
+    printf("starting...\n");
 
-    int num = 32;
+    int dev = 0;
+    cudaDeviceProp deviceProp;
+    CHECK(cudaGetDeviceProperties(&deviceProp, dev));
+    printf("Using device %d: %s\n", dev, deviceProp.name);
+
+    CHECK(cudaSetDevice(dev));
+
+    int num = 1 << 24;
     size_t nBytes = num * sizeof(float);
     printf("vector size:%d\n", num);
 
@@ -33,16 +51,24 @@ int main(int argc, char **argv) {
     cudaMemcpy(d_b, h_b, nBytes, cudaMemcpyHostToDevice);
 
     // invoke kernel at host side
-    dim3 block(num);
-    dim3 grid(num/block.x);
-    sumArrayOnGPU<<<grid, block>>>(d_a, d_b, d_c);
-    printf("config: block=%d, thread=%d\n", grid.x, block.x);
+    int threadNum = 256;
+    dim3 block(threadNum);
+    dim3 grid((num + block.x -1)/block.x);
+
+    double start = cpuSecond();
+    sumArrayOnGPU<<<grid, block>>>(d_a, d_b, d_c, num);
+    cudaDeviceSynchronize();
+    double during = cpuSecond() - start;
+    printf("GPU config:block=%d, thread=%d, time elapsed %f\n", grid.x, block.x, during);
 
     // copy kernel result back to host
     cudaMemcpy(dRet, d_c, nBytes, cudaMemcpyDeviceToHost);
     
     // host side result
+    start = cpuSecond();
     sumArrayOnHost(h_a, h_b, hRet, num);
+    during = cpuSecond() - start;
+    printf("CPU time elapsed %f\n", during);
 
     // check result
     checkResult(hRet, dRet, num);
@@ -73,9 +99,10 @@ void sumArrayOnHost(float *pa, float *pb, float *pc, const int size) {
     }
 }
 
-__global__ void sumArrayOnGPU(float *pa, float *pb, float *pc) {
+__global__ void sumArrayOnGPU(float *pa, float *pb, float *pc, const int size) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    pc[i] = pa[i] + pb[i];
+    if (i < size)
+        pc[i] = pa[i] + pb[i];
 }
 
 void checkResult(float *hRet, float *dRet, const int size) {
@@ -92,6 +119,12 @@ void checkResult(float *hRet, float *dRet, const int size) {
     if (match) {
         printf("Array match!\n");
     }
+}
+
+double cpuSecond() {
+    struct timeval tp;
+    gettimeofday(&tp, NULL);
+    return ((double)tp.tv_sec + (double)tp.tv_usec*1e-6);
 }
 
 
