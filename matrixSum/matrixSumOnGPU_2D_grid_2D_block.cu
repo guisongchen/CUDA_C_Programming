@@ -30,10 +30,10 @@ int main(int argc, char **argv) {
 
     CHECK(cudaSetDevice(dev));
 
-    int nx = 1 << 14;
-    int ny = 1 << 14;
+    int nx = 1 << 12;
+    int ny = 1 << 12;
     int nxy = nx*ny;
-    size_t nBytes = nxy * sizeof(float);  // 1GB
+    size_t nBytes = nxy * sizeof(float);  // 256MB
     printf("vector size: nx=%d ny=%d\n", nx, ny);
 
     float *h_a, *h_b, *hRet, *dRet;
@@ -55,8 +55,8 @@ int main(int argc, char **argv) {
     cudaMemcpy(d_b, h_b, nBytes, cudaMemcpyHostToDevice);
 
     // invoke kernel at host side
-    int dimx = 32;
-    int dimy = 32;
+    int dimx = 16;
+    int dimy = 16;
     dim3 block(dimx, dimy);
     dim3 grid((nx + block.x -1)/block.x, (ny + block.y - 1)/block.y);
 
@@ -64,7 +64,8 @@ int main(int argc, char **argv) {
     sumMatrixOnGPU<<<grid, block>>>(d_a, d_b, d_c, nx, ny);
     cudaDeviceSynchronize();
     double during = cpuSecond() - start;
-    printf("GPU config:block=%d, thread=%d, time elapsed %f\n", grid.x, block.x, during);
+    printf("GPU config:grid(%d,%d), block(%d,%d), time elapsed %f\n", 
+            grid.x, grid.y, block.x, block.y, during);
 
     // copy kernel result back to host
     cudaMemcpy(dRet, d_c, nBytes, cudaMemcpyDeviceToHost);
