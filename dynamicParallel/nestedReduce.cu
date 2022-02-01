@@ -194,8 +194,8 @@ int main(int argc, char **argv)
     bool bResult = false;
 
     // set up execution configuration
-    int nblock  = 2048;
-    int nthread = 512;   // initial block size
+    int nblock  = 512; // 2048
+    int nthread = 256;   // initial block size 512
 
     if(argc > 1)
     {
