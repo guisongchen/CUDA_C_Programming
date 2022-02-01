@@ -243,6 +243,61 @@ __global__ void reduceUnrollWarps4 (int *g_idata, int *g_odata, unsigned int n)
     if (tid == 0) g_odata[blockIdx.x] = idata[0];
 }
 
+__global__ void reduceCompleteUnrollWarps4 (int *g_idata, int *g_odata, unsigned int n)
+{
+    // set thread ID
+    unsigned int tid = threadIdx.x;
+
+    // unrolling neighbore
+    unsigned int idx = blockIdx.x * blockDim.x * 4 + threadIdx.x;
+
+    // unrolling current and neighbore block(+blockDim.x)
+    // at g_idata !!!
+    if (idx + blockDim.x*3 < n) {
+        int a = g_idata[idx];
+        int b = g_idata[idx+blockDim.x];
+        int c = g_idata[idx+blockDim.x*2];
+        int d = g_idata[idx+blockDim.x*3];
+        g_idata[idx] = a+b+c+d;
+    }
+    __syncthreads();
+
+    // convert global data pointer to the local pointer of this block
+    int *idata = g_idata + blockIdx.x * blockDim.x * 4;
+
+    // in-place reduction in global memory
+    // unroll explicitly when stride > 32, start from 1024/2
+    if (blockDim.x >= 1024 && tid < 512)
+        idata[tid] += idata[tid+512];
+    __syncthreads();
+
+    if (blockDim.x >= 512 && tid < 256)
+        idata[tid] += idata[tid+256];
+    __syncthreads();
+
+    if (blockDim.x >= 256 && tid < 128)
+        idata[tid] += idata[tid+128];
+    __syncthreads();
+
+    if (blockDim.x >= 128 && tid < 64)
+        idata[tid] += idata[tid+64];
+    __syncthreads();
+
+    // unrolling warp
+    if (tid < 32) {
+        volatile int *vmem = idata;
+        vmem[tid] += vmem[tid+32];
+        vmem[tid] += vmem[tid+16];
+        vmem[tid] += vmem[tid+8];
+        vmem[tid] += vmem[tid+4];
+        vmem[tid] += vmem[tid+2];
+        vmem[tid] += vmem[tid+1];
+    }
+
+    // write result for this block to global mem
+    if (tid == 0) g_odata[blockIdx.x] = idata[0];
+}
+
 int main(int argc, char **argv)
 {
     // set up device
@@ -405,6 +460,22 @@ int main(int argc, char **argv)
     for (int i = 0; i < grid.x / 4; i++) gpu_sum += h_odata[i];
 
     printf("gpu UnrollWarp4 elapsed %f sec gpu_sum: %d <<<grid %d block "
+           "%d>>>\n", iElaps, gpu_sum, grid.x / 4, block.x);
+
+    // kernel 7: reduceCompleteUnrollWarsp4
+    CHECK(cudaMemcpy(d_idata, h_idata, bytes, cudaMemcpyHostToDevice));
+    CHECK(cudaDeviceSynchronize());
+    iStart = seconds();
+    reduceCompleteUnrollWarps4<<<grid.x / 4, block>>>(d_idata, d_odata, size);
+    CHECK(cudaDeviceSynchronize());
+    iElaps = seconds() - iStart;
+    CHECK(cudaMemcpy(h_odata, d_odata, grid.x / 4 * sizeof(int),
+                     cudaMemcpyDeviceToHost));
+    gpu_sum = 0;
+
+    for (int i = 0; i < grid.x / 4; i++) gpu_sum += h_odata[i];
+
+    printf("gpu Cmptnroll4  elapsed %f sec gpu_sum: %d <<<grid %d block "
            "%d>>>\n", iElaps, gpu_sum, grid.x / 4, block.x);
 
     // free host memory
