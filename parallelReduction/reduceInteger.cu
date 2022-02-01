@@ -57,6 +57,39 @@ __global__ void reduceNeighbored (int *g_idata, int *g_odata, unsigned int n)
     if (tid == 0) g_odata[blockIdx.x] = idata[0];
 }
 
+// Neighbored Pair Implementation with less divergence
+// basic idea: let tid 0,1,2,3 act as tid 0,2,4,6 in reduceNeighbored
+// unlike reduceNeighbored, even tid like 0,2,4 working while tid 1,3,5 at rest
+// in reduceNeighboredLess, all the scheduled threads have work to do
+__global__ void reduceNeighboredLess (int *g_idata, int *g_odata, unsigned int n)
+{
+    // set thread ID
+    unsigned int tid = threadIdx.x;
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    // convert global data pointer to the local pointer of this block
+    int *idata = g_idata + blockIdx.x * blockDim.x;
+
+    // boundary check
+    if (idx >= n) return;
+
+    // in-place reduction in global memory
+    for (int stride = 1; stride < blockDim.x; stride *= 2)
+    {
+        int index = 2*stride*tid;
+        if (index < blockDim.x)
+        {
+            idata[index] += idata[index + stride];
+        }
+
+        // synchronize within threadblock
+        __syncthreads();
+    }
+
+    // write result for this block to global mem
+    if (tid == 0) g_odata[blockIdx.x] = idata[0];
+}
+
 int main(int argc, char **argv)
 {
     // set up device
@@ -138,6 +171,22 @@ int main(int argc, char **argv)
     for (int i = 0; i < grid.x; i++) gpu_sum += h_odata[i];
 
     printf("gpu Neighbored  elapsed %f sec gpu_sum: %d <<<grid %d block "
+           "%d>>>\n", iElaps, gpu_sum, grid.x, block.x);
+
+    // kernel 2: reduceNeighbored with less divergence
+    CHECK(cudaMemcpy(d_idata, h_idata, bytes, cudaMemcpyHostToDevice));
+    CHECK(cudaDeviceSynchronize());
+    iStart = seconds();
+    reduceNeighboredLess<<<grid, block>>>(d_idata, d_odata, size);
+    CHECK(cudaDeviceSynchronize());
+    iElaps = seconds() - iStart;
+    CHECK(cudaMemcpy(h_odata, d_odata, grid.x * sizeof(int),
+                     cudaMemcpyDeviceToHost));
+    gpu_sum = 0;
+
+    for (int i = 0; i < grid.x; i++) gpu_sum += h_odata[i];
+
+    printf("gpu Neighbored2 elapsed %f sec gpu_sum: %d <<<grid %d block "
            "%d>>>\n", iElaps, gpu_sum, grid.x, block.x);
 
     // free host memory
